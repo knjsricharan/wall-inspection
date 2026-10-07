@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { HealthResponse, InferenceResponse, ProcessResponse, QualityStatus } from './types'
+import type { HealthResponse, InferenceResponse, ProcessResponse, QualityStatus, ReportResponse } from './types'
 
 const API_BASE = '/api'
 const PROJECT_TITLE = 'AI-Based Wall Inspection System for Heritage Masonry'
@@ -50,11 +50,13 @@ export default function App() {
   const [phase, setPhase] = useState<ProcessingPhase>('idle')
   const [result, setResult] = useState<ProcessResponse | null>(null)
   const [inference, setInference] = useState<InferenceResponse | null>(null)
+  const [report, setReport] = useState<ReportResponse | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const resetInspection = useCallback((nextView: View = 'home') => {
-    setSelectedFile(null); setResult(null); setInference(null); setError(null); setPhase('idle')
+    setSelectedFile(null); setResult(null); setInference(null); setReport(null); setError(null); setPhase('idle')
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewUrl(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -68,12 +70,12 @@ export default function App() {
     }
     const url = URL.createObjectURL(file)
     setPreviewUrl(current => { if (current) URL.revokeObjectURL(current); return url })
-    setSelectedFile(file); setResult(null); setInference(null); setError(null); setPhase('idle'); setView('setup')
+    setSelectedFile(file); setResult(null); setInference(null); setReport(null); setError(null); setPhase('idle'); setView('setup')
   }, [])
 
   const runProcessing = async () => {
     if (!selectedFile) { setError('Choose an image before starting the inspection.'); return }
-    setLoading(true); setError(null); setResult(null); setInference(null); setPhase('quality'); setView('processing')
+    setLoading(true); setError(null); setResult(null); setInference(null); setReport(null); setPhase('quality'); setView('processing')
     try {
       const formData = new FormData()
       formData.append('image', selectedFile)
@@ -100,6 +102,31 @@ export default function App() {
       setError(caughtError instanceof Error ? caughtError.message : 'An unexpected error occurred.')
       setView('setup')
     } finally { setLoading(false); setPhase('idle') }
+  }
+
+  const generateReport = async () => {
+    if (!result || !inference || inference.status !== 'completed') return
+    setReportLoading(true); setError(null)
+    try {
+      const response = await fetch(API_BASE + '/generate-report', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_reference: selectedFile?.name ?? result.original_image_url,
+          original_image_url: result.original_image_url,
+          processed_image_url: result.processed_image_url,
+          quality_status: result.quality_result.status,
+          processing_status: 'completed',
+          inference,
+        }),
+      })
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}))
+        throw new Error(detail?.detail ?? ('Report server error ' + response.status))
+      }
+      setReport(await response.json())
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Report generation failed.')
+    } finally { setReportLoading(false) }
   }
 
   const imageUrl = (url: string) => API_BASE.replace('/api', '') + url
@@ -173,12 +200,14 @@ export default function App() {
     <div className="page-heading"><div><div className="eyebrow">Inspection output</div><h1>Segmentation results</h1><p>Review the processed image and model output. Results refer only to visible surface features in this image.</p></div><div className="button-row"><button className="text-button" type="button" onClick={() => setView('quality')}>Quality check</button><button className="text-button" type="button" onClick={() => resetInspection('setup')}>Start over</button></div></div>
     <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Image review</div><h2>Original and processed image</h2></div></div><div className="image-comparison"><figure><img src={imageUrl(result.original_image_url)} alt="Original wall image" /><figcaption>Original image</figcaption></figure>{result.processed_image_url && <figure><img src={imageUrl(result.processed_image_url)} alt="Processed wall image" /><figcaption>Processed image</figcaption></figure>}</div>{result.metadata && <p className="operations-note">Applied operations: {result.metadata.operations_applied.join(', ')}.</p>}</section>
     <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Detection output</div><h2>Segmentation overlay</h2></div></div>{inference.status === 'model_not_available' ? <div className="state-notice state-notice--warning"><strong>Model not available</strong><p>{inference.message}</p><code>{inference.model_path}</code></div> : <>{inference.overlay_image_url && <img className="inference-overlay" src={imageUrl(inference.overlay_image_url)} alt="Segmentation overlay" />}<div className="detection-summary"><strong>{inference.detections.length}</strong><span>{inference.detections.length === 1 ? 'detection returned' : 'detections returned'}</span><p>{inference.message}</p></div></>}</section>
-    {inference.status === 'completed' && inference.measurement_summary && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Measurement summary</div><h2>Uncalibrated pixel measurements</h2></div></div><div className="metrics-grid measurement-grid"><MetricItem label="Detected cracks" value={String(inference.measurement_summary.detected_cracks)} /><MetricItem label="Total crack area" value={inference.measurement_summary.total_area_px2.toFixed(0) + ' px²'} /><MetricItem label="Total crack length" value={inference.measurement_summary.total_length_px.toFixed(1) + ' px'} /><MetricItem label="Maximum crack width" value={inference.measurement_summary.max_width_px.toFixed(1) + ' px'} /></div><p className="operations-note">Unit: pixels. Calibrated: {inference.measurement_summary.calibrated ? 'yes' : 'no'}.</p>{inference.measurement_overlay_url && <figure className="measurement-figure"><img className="inference-overlay" src={imageUrl(inference.measurement_overlay_url)} alt="Measurement overlay" /><figcaption>Measurement and cleaned-mask overlay</figcaption></figure>}</section>}
-    {inference.status === 'completed' && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Detection details</div><h2>Model detections</h2></div></div>{inference.detections.length === 0 ? <div className="state-notice"><strong>No detections found</strong><p>The model completed inference but did not return a detection for this image. You can choose another image or review the quality check.</p></div> : <div className="detections-table-wrap"><table className="detections-table"><thead><tr><th>Crack</th><th>Class</th><th>Confidence</th><th>Length</th><th>Width</th><th>Max width</th><th>Area</th><th>Orientation</th><th>Unit</th><th>Mask</th></tr></thead><tbody>{inference.detections.map((detection, index) => <tr key={detection.class_id + '-' + index}><td>{(detection.detection_id ?? index) + 1}</td><td>{detection.class_name}</td><td>{(detection.confidence * 100).toFixed(1)}%</td><td>{formatOptional(detection.length_px, 'px')}</td><td>{formatOptional(detection.width_px, 'px')}</td><td>{formatOptional(detection.max_width_px, 'px')}</td><td>{typeof detection.area_px2 === 'number' ? detection.area_px2.toFixed(0) + ' px²' : 'Not returned'}</td><td>{formatOptional(detection.orientation_deg, '°')}</td><td>{detection.measurement_unit ? detection.measurement_unit + (detection.calibrated ? '' : ' (uncalibrated)') : 'Not returned'}</td><td><a href={imageUrl(detection.segmentation_mask.cleaned_mask_url ?? detection.segmentation_mask.mask_url)} target="_blank" rel="noreferrer">Open mask</a></td></tr>)}</tbody></table></div>}</section>}
+    {inference.status === 'completed' && inference.measurement_summary && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Measurements</div><h2>Pixel crack measurements</h2></div></div><div className="metrics-grid measurement-grid"><MetricItem label="Detected cracks" value={String(inference.measurement_summary.detected_cracks)} /><MetricItem label="Total crack area" value={inference.measurement_summary.total_area_px2.toFixed(0) + ' px²'} /><MetricItem label="Total crack length" value={inference.measurement_summary.total_length_px.toFixed(1) + ' px'} /><MetricItem label="Maximum crack width" value={inference.measurement_summary.max_width_px.toFixed(1) + ' px'} /></div><p className="operations-note">Measurement mode: pixel. Physical dimensions are not used in the live assessment.</p>{inference.measurement_overlay_url && <figure className="measurement-figure"><img className="inference-overlay" src={imageUrl(inference.measurement_overlay_url)} alt="Measurement overlay" /><figcaption>Measurement and cleaned-mask overlay</figcaption></figure>}</section>}
+    {inference.status === 'completed' && inference.condition_assessment && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Condition assessment</div><h2>Visible Surface Condition Assessment</h2></div><strong className="condition-badge">{inference.condition_assessment.condition}</strong></div><div className="metrics-grid measurement-grid"><MetricItem label="Condition score" value={inference.condition_assessment.condition_score.toFixed(1) + ' / 10'} /><MetricItem label="Measurement mode" value="Pixel-based" /></div><p className="assessment-factors">Assessment factors: Crack width · Crack area · Crack length · Detection confidence</p></section>}
+    {inference.status === 'completed' && <section className="result-section report-section"><div className="result-section__heading"><div><div className="section-kicker">Report</div><h2>Automated inspection report</h2></div></div><p className="operations-note">Generate a report from this live pixel-based inspection. It contains no generated recommendations.</p><button className="btn btn--primary report-generate-button" type="button" onClick={generateReport} disabled={reportLoading}>{reportLoading ? 'Generating report' : 'Generate report'} <ArrowIcon /></button>{report && <div className="report-links"><a className="export-button" href={imageUrl(report.docx_url)} download>DOCX</a><a className="export-button" href={imageUrl(report.pdf_url)} download>PDF</a><a className="export-button" href={imageUrl(report.png_url)} download>PNG</a></div>}</section>}
+    {inference.status === 'completed' && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Detection details</div><h2>Model detections</h2></div></div>{inference.detections.length === 0 ? <div className="state-notice"><strong>No detectable surface damage</strong><p>No damage was detected by the current model. This is not proof that the wall is defect-free.</p></div> : <div className="detections-table-wrap"><table className="detections-table"><thead><tr><th>Crack</th><th>Class</th><th>Confidence</th><th>Length</th><th>Width</th><th>Max width</th><th>Area</th><th>Orientation</th><th>Unit</th><th>Mask</th></tr></thead><tbody>{inference.detections.map((detection, index) => <tr key={detection.class_id + '-' + index}><td>{(detection.detection_id ?? index) + 1}</td><td>{detection.class_name}</td><td>{(detection.confidence * 100).toFixed(1)}%</td><td>{formatOptional(detection.length_px, 'px')}</td><td>{formatOptional(detection.width_px, 'px')}</td><td>{formatOptional(detection.max_width_px, 'px')}</td><td>{typeof detection.area_px2 === 'number' ? detection.area_px2.toFixed(0) + ' px²' : 'Not returned'}</td><td>{formatOptional(detection.orientation_deg, '°')}</td><td>pixel</td><td><a href={imageUrl(detection.segmentation_mask.cleaned_mask_url ?? detection.segmentation_mask.mask_url)} target="_blank" rel="noreferrer">Open mask</a></td></tr>)}</tbody></table></div>}</section>}
   </section>
 
   return <div className="app-shell">
-    <header className="app-header"><div className="app-header__inner"><button className="brand" type="button" onClick={() => setView('home')} aria-label="Open dashboard"><span className="brand__mark" aria-hidden="true">HM</span><span>{PROJECT_TITLE}</span></button><nav className="header-nav" aria-label="Primary navigation"><button type="button" className={view === 'home' ? 'is-active' : ''} onClick={() => setView('home')}>Dashboard</button><button type="button" className={view === 'setup' ? 'is-active' : ''} onClick={() => resetInspection('setup')}>New inspection</button></nav></div></header>
+    <header className="app-header"><div className="app-header__inner"><button className="brand" type="button" onClick={() => setView('home')} aria-label="Open dashboard"><span>{PROJECT_TITLE}</span></button><nav className="header-nav" aria-label="Primary navigation"><button type="button" className={view === 'home' ? 'is-active' : ''} onClick={() => setView('home')}>Dashboard</button><button type="button" className={view === 'setup' ? 'is-active' : ''} onClick={() => resetInspection('setup')}>New inspection</button></nav></div></header>
     <main className="app-main"><div className="page-container">{view !== 'home' && workflow}{view === 'home' && home}{view === 'setup' && setup}{view === 'quality' && quality}{view === 'processing' && processing}{view === 'results' && results}</div></main>
     <footer className="app-footer">By 23331A0599, 23331A05A0, 23331A05A4, 23331A05A9</footer>
   </div>

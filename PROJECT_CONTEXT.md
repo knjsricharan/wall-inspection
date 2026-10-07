@@ -28,7 +28,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **RAG System**: Not Started
 
 ## 5. Current Milestone
-**MILESTONE 4 — COMPUTER VISION POST-PROCESSING AND DAMAGE MEASUREMENT — IMPLEMENTED**
+**CURRENT PHASE — PIXEL CONDITION ASSESSMENT AND AUTOMATED REPORT — IMPLEMENTED / LIVE**
 - **Objective**: Clean YOLO segmentation masks conservatively and calculate uncalibrated pixel measurements for crack detections.
 - **Work Completed**:
   - Added a separate mask post-processing service for binary mask validation, small-region removal, and small-gap closing.
@@ -75,7 +75,10 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Inference Input**: YOLO only accepts a local `/uploads/...` image returned by the processing route. It does not repeat quality checking or preprocessing.
 - **Model Honesty**: The absence of a checkpoint is a visible `model_not_available` state. An empty detection list means a model actually ran and detected nothing.
 - **Prototype Behaviour**: The generic crack prototype can detect multiple cracks in one image, but may produce false positives on non-real/artificial crack imagery. This is expected and must not be presented as final heritage-model performance.
-- **Measurement Units**: Milestone 4 measurements are pixel-only and must return `measurement_unit: "pixel"` with `calibrated: false`. Do not convert to mm/mm² until a real calibration workflow exists.
+- **Measurement Units**: The live workflow uses pixel measurements only. Physical calibration and conversion remain implemented but deferred and are not invoked by normal inference, shown in the UI, or included in reports.
+- **Calibration**: `backend/services/calibration_service.py` is retained for future use only. The physical calibration / physical-unit conversion component has already been implemented separately. It is intentionally excluded from the live UI and current inspection workflow because reliable physical scale cannot be guaranteed for arbitrary uploaded wall images. The live system therefore uses uncalibrated pixel-level measurements.
+- **Condition Assessment**: `backend/services/condition_service.py` is live and uses explainable, centralized project-defined prototype thresholds over pixel width, area, length, count, and confidence. Its condition score is bounded 0-10 with 10 representing best visible surface condition and 0 representing greatest visible damage; higher score means better condition. Categories are Mild, Moderate, and Severe. It reports visible surface condition only and is not a structural-safety standard.
+- **Reports**: `backend/services/report_service.py` generates reports only from the current live inspection payload in DOCX, PDF, and PNG formats. Reports contain pixel findings, condition assessment, limitations, and scope disclaimer; no physical calibration, RAG, or LLM content.
 - **Post-Processing Philosophy**: Mask cleanup is intentionally conservative. Small isolated regions may be removed by configurable threshold, but detections must not be hidden because they look unusual.
 
 ## 8. Environment & Run Instructions
@@ -91,15 +94,20 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Copy `.env.example` to `.env` and populate Supabase credentials.
   - Set `MODEL_PATH=models/best.pt` (must be a compatible YOLOv8 segmentation checkpoint), `YOLO_CONFIDENCE_THRESHOLD=0.25`, and `YOLO_IMAGE_SIZE=640` as needed.
   - Optional post-processing settings: `MASK_MIN_REGION_AREA_PX`, `MASK_CLOSING_KERNEL_SIZE`, and `MASK_CLOSING_ITERATIONS`.
+  - Calibration settings remain available for deferred future use but are not part of the live workflow.
+  - Optional condition settings: `CONDITION_*_MM`, `CONDITION_*_MM2`, `CONDITION_*_PX`, `CONDITION_*_PX2`, confidence thresholds, and `CONDITION_UNCALIBRATED_SUPPORTED`.
 
 ## 9. Testing Status
-- **Milestones**: Milestone 1 (Foundation), Milestone 2 (Image Pipeline), and Milestone 3 (AI Inference) are completed. Milestone 4 is implemented and pending full Python-runtime test execution.
-- **Tests Implemented**: `tests/test_quality_regression.py` (6 tests), `tests/test_process_api.py` (7 tests), `tests/test_inference_api.py`, and `tests/test_measurement_services.py`.
+- **Milestones**: Milestones 1-4 are implemented. Current phase modules are live pixel condition assessment and automated inspection reporting; physical calibration is implemented but deferred.
+- **Tests Implemented**: Existing quality/process/inference suites, `tests/test_measurement_services.py`, `tests/test_calibration_condition.py`, and `tests/test_report_service.py`.
 - **Latest Verification (2026-10-07)**:
   - `npm run build` passed.
   - `rg "AWIS-HM" frontend` returned no matches, confirming no new forbidden frontend acronym text.
   - `python -m compileall backend tests` passed using the bundled Python for syntax checks.
-  - Full `pytest` execution could not run because `.venv\Scripts\python.exe` points to a missing Python 3.11 install and the bundled Python is 3.12, which is incompatible with the venv's NumPy/OpenCV compiled wheels.
+  - Full suite completion was not verified because the process API suite exceeded the available verification window. The configured Python 3.11 environment now runs pytest; the bundled Python still lacks the project's `pydantic-settings` dependency for report smoke execution.
+  - Focused condition, measurement, calibration, and report tests: 18 passed.
+  - Quality regression tests: 6 passed.
+  - The process API suite exceeded the available verification window and was stopped without an application failure result.
 - **Previous Tests Passed**: 13 / 13 before Milestone 4 changes.
 - **Tests Failed**: No application test failures observed in this run; full pytest execution was blocked by the local Python runtime mismatch.
 - **Milestone 3 static check (2026-10-07)**: `npm run build` passed.
@@ -116,6 +124,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 ## 10. Known Problems / Blockers
 - Local Python verification blocker: `.venv` was created from `C:\Users\srich\AppData\Local\Python\pythoncore-3.11-64\python.exe`, but that interpreter is no longer available. Recreate the Python 3.11 environment and reinstall `requirements.txt` before running the full backend tests.
 - Final heritage-specific model fine-tuning/evaluation is pending. The current local checkpoint remains a prototype and is intentionally not committed to Git.
+- The physical calibration module may not be available in every OpenCV build; it remains isolated and deferred. Physical measurements depend on a valid image-specific scale reference.
 
 ## 10a. Resolved Issues
 - **Issue**: Quality checker classified usable wall images as FAIL (2026-10-06).
@@ -123,7 +132,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - **Fix Applied**: Replaced single-tier thresholds with two-tier FAIL/WARNING/PASS classification.
 
 ## 11. Next Immediate Task
-- Repair/recreate the Python 3.11 virtual environment, run the full pytest suite, and manually re-run the upload → processing → inference → measurement flow with the current prototype checkpoint. After that, begin **MILESTONE 5 — CONDITION ASSESSMENT** with configurable provisional scoring rules. Do not add history, Supabase persistence, RAG, or reports until the condition-assessment milestone is complete.
+- Repair/recreate the Python 3.11 virtual environment, run all tests, render and inspect generated DOCX/PDF/PNG artifacts, and manually verify the live pixel workflow plus downloads. Physical calibration remains deferred. Do not add RAG, LLM recommendations, history, Supabase persistence, comparison, or structural safety evaluation.
 
 ## 12. Change Log
 - **2026-10-05**: Initialized `PROJECT_CONTEXT.md` prior to starting Milestone 1.
@@ -133,3 +142,8 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **2026-10-06 (Late evening)**: Fixed Milestone 2 manual UI result display. The backend returned valid `/uploads/...` URLs, but Vite did not proxy `/uploads`, so the browser received the SPA HTML fallback instead of JPEG bytes. Added the `/uploads` Vite proxy and verified the live before/after flow plus quality-fail behavior.
 - **2026-10-07**: Implemented and runtime-verified Milestone 3 with a Python 3.11 virtual environment and a real YOLOv8-seg crack checkpoint. CPU inference returns multiple detections where present, masks/polygons, and overlays. Continued development uses YOLOv8m `{0: "crack"}` as a lighter prototype model; heritage-specific fine-tuning/evaluation remains pending.
 - **2026-10-07**: Implemented Milestone 4 mask post-processing and pixel measurement. Added conservative cleaned masks, area, skeleton length, representative width, maximum width, orientation, measurement summary, cleaned-mask/measurement overlays, frontend result display, and synthetic-mask tests. Frontend build and syntax checks passed; full pytest run is pending Python 3.11 environment repair.
+- **2026-10-07**: Implemented MILESTONE 5 physical measurement calibration and visible-surface condition assessment. Added per-image ArUco calibration with safe failure, additive mm/cm and mm²/cm² conversions, calibration overlay, configurable calibrated/pixel prototype thresholds, Mild/Moderate/Severe assessment, frontend calibration/measurement/assessment sections, and focused tests. Syntax compilation and frontend build passed; full pytest and live marker/manual flows remain pending Python runtime repair and suitable test images.
+- **2026-10-07**: Activated the current phase's live pixel-only condition assessment and automated report generation. Normal inference no longer invokes calibration; the Results page shows pixel mode, condition status, and report downloads. Added DOCX, PDF, and PNG report generation from actual live payloads, API endpoint, frontend controls, and report tests. Backend syntax and frontend build passed; full runtime tests and visual artifact QA remain pending environment repair.
+- **2026-10-07**: Fixed backend startup when report-only dependencies are absent. DOCX/PDF/PNG libraries are now imported lazily during report generation, `python-docx` and `reportlab` are listed in `requirements.txt`, and the report endpoint returns a controlled error instead of preventing Uvicorn startup. `import backend.main` verified successfully.
+- **2026-10-07**: Fixed a live condition-response validation bug caused by positional dataclass construction after adding `measurement_mode`. Condition assessment results now use named fields and correctly return pixel mode plus preliminary status.
+- **2026-10-07**: Corrected condition-score semantics so the score is an inverse damage score: higher scores indicate better visible condition, lower scores indicate greater visible damage, and category cutoffs are configurable. Added monotonicity and bounded-score tests. Centered the workflow stepper and processing page, moderately reduced dashboard hero spacing, and preserved compact image limits in the frontend.

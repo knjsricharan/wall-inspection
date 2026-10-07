@@ -65,6 +65,14 @@ export interface Detection {
   orientation_deg: number | null
   measurement_unit: string | null
   calibrated: boolean | null
+  length_mm: number | null
+  length_cm: number | null
+  width_mm: number | null
+  width_cm: number | null
+  max_width_mm: number | null
+  max_width_cm: number | null
+  area_mm2: number | null
+  area_cm2: number | null
 }
 
 export interface MeasurementSummary {
@@ -74,6 +82,37 @@ export interface MeasurementSummary {
   max_width_px: number
   measurement_unit: string
   calibrated: boolean
+  total_area_mm2: number | null
+  total_area_cm2: number | null
+  total_length_mm: number | null
+  total_length_cm: number | null
+  max_width_mm: number | null
+  max_width_cm: number | null
+}
+
+export interface CalibrationInfo {
+  marker_detected: boolean
+  marker_id: number | null
+  marker_size_mm: number
+  marker_pixel_size: number | null
+  pixels_per_mm: number | null
+  calibrated: boolean
+  measurement_unit: string
+  calibration_status: string
+  calibration_quality: string
+}
+
+export interface ConditionAssessment {
+  condition: string
+  condition_score: number
+  calibrated: boolean
+  measurement_mode: string
+  preliminary: boolean
+  assessment_type: string
+  threshold_profile: string
+  threshold_configuration: Record<string, number | boolean | string>
+  basis: string[]
+  reasons: string[]
 }
 
 export interface InferenceResponse {
@@ -83,5 +122,17 @@ export interface InferenceResponse {
   overlay_image_url: string | null
   measurement_overlay_url: string | null
   measurement_summary: MeasurementSummary | null
+  calibration: CalibrationInfo | null
+  calibration_overlay_url: string | null
+  condition_assessment: ConditionAssessment | null
   detections: Detection[]
+}
+
+export interface ReportResponse {
+  status: string
+  report_id: string
+  docx_url: string
+  pdf_url: string
+  png_url: string
+  message: string
 }

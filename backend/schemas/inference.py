@@ -43,6 +43,14 @@ class Detection(BaseModel):
     orientation_deg: float | None = None
     measurement_unit: str | None = None
     calibrated: bool | None = None
+    length_mm: float | None = None
+    length_cm: float | None = None
+    width_mm: float | None = None
+    width_cm: float | None = None
+    max_width_mm: float | None = None
+    max_width_cm: float | None = None
+    area_mm2: float | None = None
+    area_cm2: float | None = None
 
 
 class MeasurementSummary(BaseModel):
@@ -52,6 +60,37 @@ class MeasurementSummary(BaseModel):
     max_width_px: float = 0.0
     measurement_unit: str = "pixel"
     calibrated: bool = False
+    total_area_mm2: float | None = None
+    total_area_cm2: float | None = None
+    total_length_mm: float | None = None
+    total_length_cm: float | None = None
+    max_width_mm: float | None = None
+    max_width_cm: float | None = None
+
+
+class CalibrationInfo(BaseModel):
+    marker_detected: bool
+    marker_id: int | None = None
+    marker_size_mm: float
+    marker_pixel_size: float | None = None
+    pixels_per_mm: float | None = None
+    calibrated: bool
+    measurement_unit: str
+    calibration_status: str
+    calibration_quality: str
+
+
+class ConditionAssessment(BaseModel):
+    condition: str
+    condition_score: float
+    calibrated: bool
+    measurement_mode: str
+    preliminary: bool
+    assessment_type: str
+    threshold_profile: str
+    threshold_configuration: dict
+    basis: list[str]
+    reasons: list[str]
 
 
 class InferenceResponse(BaseModel):
@@ -61,4 +100,7 @@ class InferenceResponse(BaseModel):
     overlay_image_url: str | None = None
     measurement_overlay_url: str | None = None
     measurement_summary: MeasurementSummary | None = None
+    calibration: CalibrationInfo | None = None
+    calibration_overlay_url: str | None = None
+    condition_assessment: ConditionAssessment | None = None
     detections: list[Detection] = []

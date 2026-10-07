@@ -71,6 +71,32 @@ class Settings(BaseSettings):
     mask_closing_kernel_size: int = 3
     mask_closing_iterations: int = 1
 
+    # Image-specific physical calibration. The user must include a real marker
+    # printed/measured to this size in each image; this is not a universal scale.
+    calibration_marker_size_mm: float = 50.0
+    calibration_dictionary: str = "DICT_4X4_50"
+    calibration_min_marker_side_px: float = 20.0
+
+    # Project-defined prototype condition thresholds. Calibrated values use
+    # mm/mm2; uncalibrated values use explicitly separate pixel thresholds.
+    condition_width_moderate_mm: float = 1.0
+    condition_width_severe_mm: float = 3.0
+    condition_area_moderate_mm2: float = 500.0
+    condition_area_severe_mm2: float = 2000.0
+    condition_length_moderate_mm: float = 100.0
+    condition_length_severe_mm: float = 500.0
+    condition_width_moderate_px: float = 3.0
+    condition_width_severe_px: float = 10.0
+    condition_area_moderate_px2: float = 1000.0
+    condition_area_severe_px2: float = 5000.0
+    condition_length_moderate_px: float = 100.0
+    condition_length_severe_px: float = 500.0
+    condition_confidence_high: float = 0.75
+    condition_confidence_low: float = 0.50
+    condition_uncalibrated_supported: bool = True
+    condition_mild_min_score: float = 7.5
+    condition_moderate_min_score: float = 4.0
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

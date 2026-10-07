@@ -10,3 +10,5 @@ pydantic-settings
 httpx
 ultralytics
 pytest
+python-docx
+reportlab

@@ -11,6 +11,7 @@ import numpy as np
 from backend.core.config import get_settings
 from backend.schemas.inference import (
     BoundingBox,
+    ConditionAssessment,
     Detection,
     InferenceResponse,
     MeasurementSummary,
@@ -18,6 +19,7 @@ from backend.schemas.inference import (
 )
 from backend.services.measurement_service import measure_crack_mask, summarize_measurements
 from backend.services.postprocess_service import postprocess_mask
+from backend.services.condition_service import ConditionThresholds, assess_condition
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,7 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
     measurement_overlay = image.copy()
     detections: list[Detection] = []
     measurements = []
+    confidences: list[float] = []
     timestamp = int(time.time() * 1000)
     base_name = os.path.splitext(filename)[0]
 
@@ -143,6 +146,7 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
             cv2.imwrite(cleaned_mask_path, cleaned_mask * 255)
             measurement = measure_crack_mask(cleaned_mask)
             measurements.append(measurement)
+            confidences.append(confidence)
 
             color = _color_for_class(class_id)
             overlay[binary_mask.astype(bool)] = (
@@ -183,7 +187,7 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
                 area_px2=measurement.area_px2,
                 orientation_deg=measurement.orientation_deg,
                 measurement_unit=measurement.measurement_unit,
-                calibrated=measurement.calibrated,
+                calibrated=False,
             ))
 
     overlay_filename = f"{timestamp}_overlay_{base_name}.jpg"
@@ -191,6 +195,20 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
     cv2.imwrite(os.path.join(settings.upload_dir, overlay_filename), overlay)
     cv2.imwrite(os.path.join(settings.upload_dir, measurement_overlay_filename), measurement_overlay)
     summary = summarize_measurements(measurements)
+    thresholds = ConditionThresholds(
+        width_moderate=settings.condition_width_moderate_px,
+        width_severe=settings.condition_width_severe_px,
+        area_moderate=settings.condition_area_moderate_px2,
+        area_severe=settings.condition_area_severe_px2,
+        length_moderate=settings.condition_length_moderate_px,
+        length_severe=settings.condition_length_severe_px,
+        confidence_high=settings.condition_confidence_high,
+        confidence_low=settings.condition_confidence_low,
+        uncalibrated_supported=settings.condition_uncalibrated_supported,
+        mild_min_score=settings.condition_mild_min_score,
+        moderate_min_score=settings.condition_moderate_min_score,
+    )
+    assessment = assess_condition(measurements, confidences, False, thresholds)
     return InferenceResponse(
         status="completed",
         message=(f"Inference completed with {len(detections)} detection(s)." if detections else "Inference completed with no detections."),
@@ -198,5 +216,6 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
         overlay_image_url=f"/uploads/{overlay_filename}",
         measurement_overlay_url=f"/uploads/{measurement_overlay_filename}",
         measurement_summary=MeasurementSummary(**summary),
+        condition_assessment=ConditionAssessment(**assessment.__dict__),
         detections=detections,
     )
