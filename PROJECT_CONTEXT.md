@@ -1,7 +1,7 @@
 # PROJECT_CONTEXT
 
 ## 1. Project Summary
-AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based end-to-end system that accepts a smartphone image of a heritage masonry wall and produces a surface condition inspection result. It uses YOLOv8-seg for damage detection and segmentation, computes crack measurements (length, width, area), scores the condition, and features a RAG (Retrieval-Augmented Generation) decision-support layer to generate evidence-backed inspection reports. It evaluates visible surface damage only.
+AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based inspection-assistance system that accepts a wall image and produces visible-surface detections, pixel measurements, a project-defined condition assessment, and automated DOCX/PDF/PNG inspection reports. RAG and LLM decision support remain future work. The system evaluates visible surface damage only.
 
 ## 2. Current Architecture
 - **Frontend**: React application running on the user's laptop. (Running via Vite dev server)
@@ -9,6 +9,8 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Image Pipeline**: Quality check and conditional preprocessing implemented using OpenCV.
 - **AI Inference**: YOLOv8-seg CPU inference is implemented and runtime verified with a real local crack-segmentation checkpoint.
 - **Post-Processing & Measurement**: Implemented for YOLO segmentation masks with conservative cleanup and uncalibrated pixel measurements.
+- **Condition Assessment**: Live rule-based pixel assessment with inverse 0-10 condition scoring and Mild / Moderate / Severe categories.
+- **Report Generation**: Live report service and API for DOCX, PDF, and PNG exports from actual inspection data.
 - **Database**: Supabase client initialized and tested.
 - **RAG Layer**: Not implemented yet.
 
@@ -20,8 +22,8 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 
 ## 4. Current Implementation Status
 - **Overall Status**: In Progress
-- **Frontend**: Working (Milestones 1–3 completed; automatically displays YOLO segmentation results after processing)
-- **Backend**: Working (Milestones 1–3 completed and runtime verified)
+- **Frontend**: Working (inspection workflow, compact fixed header/footer layout, pixel measurements, condition assessment, and report downloads)
+- **Backend**: Working (quality, preprocessing, CPU YOLO inference, post-processing, pixel measurement, condition assessment, and report API)
 - **Database/Supabase**: Initialized but credentials not provided in `.env`
 - **Image Pipeline**: Completed (Quality Check + Preprocessing)
 - **AI Pipeline**: Completed for the current prototype model; configurable local checkpoint, CPU inference, masks, overlays, and multiple detections are verified.
@@ -29,7 +31,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 
 ## 5. Current Milestone
 **CURRENT PHASE — PIXEL CONDITION ASSESSMENT AND AUTOMATED REPORT — IMPLEMENTED / LIVE**
-- **Objective**: Clean YOLO segmentation masks conservatively and calculate uncalibrated pixel measurements for crack detections.
+- **Objective**: Convert live pixel measurements into a visible-surface condition assessment and generate basic reports without physical calibration, RAG, or LLM content.
 - **Work Completed**:
   - Added a separate mask post-processing service for binary mask validation, small-region removal, and small-gap closing.
   - Added a separate measurement service for area, skeleton length, distance-transform width, maximum width, and PCA-based orientation.
@@ -39,8 +41,11 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Added cleaned mask files and a measurement overlay without replacing the existing detection overlay.
   - Updated the frontend Results page to show uncalibrated pixel measurements and cleaned-mask links only when returned by the backend.
   - Added synthetic-mask unit tests and an inference API regression test using a fake deterministic model result.
-- **Work Remaining**: Runtime verification with the local YOLO checkpoint after Python 3.11 is restored. Begin Milestone 5 only after measurement tests pass in the repaired environment.
-- **Limitations**: Measurements are uncalibrated pixel values only. Physical mm/mm² calibration is pending. The YOLOv8m checkpoint remains a prototype/integration model, not a final heritage-trained AWIS-HM model; no final accuracy metrics are claimed.
+  - Added live rule-based condition assessment using crack width, crack area, crack length, and detection confidence. The score is 0-10, where 10 is best visible condition and 0 is greatest visible damage.
+  - Added automated report generation with DOCX, PDF, and PNG exports from actual live inspection payloads.
+  - Added fixed 56px header, fixed 36px footer, centered workflow/processing groups, compact upload/dashboard spacing, and explicit image height limits in the frontend.
+- **Work Remaining**: Complete the slower process/inference regression suites and perform manual 1366x768 visual and report-download verification when needed.
+- **Limitations**: Measurements are uncalibrated pixel values only. Physical calibration is implemented but deferred. The YOLOv8m checkpoint remains a prototype/integration model, not a final heritage-trained AWIS-HM model; no final accuracy metrics are claimed.
 
 ## 6. What Was Built
 - **Backend**:
@@ -53,13 +58,21 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - `backend/services/postprocess_service.py`: Conservative binary segmentation mask cleanup.
   - `backend/services/measurement_service.py`: Uncalibrated crack area, skeleton length, distance-transform width, maximum width, and orientation measurement.
   - `backend/schemas/inference.py`: Inference and measurement API schemas.
+  - `backend/services/condition_service.py`: Centralized project-defined pixel thresholds and inverse condition scoring.
+  - `backend/services/calibration_service.py`: Deferred physical calibration and conversion component; not used by live inference.
+  - `backend/services/report_service.py`: DOCX, PDF, and PNG report generation from live pixel inspection data.
+  - `backend/api/report.py`: `POST /api/generate-report`.
+  - `backend/schemas/report.py`: Report request and response contracts.
 - **Frontend**:
   - `frontend/src/App.tsx`: Updated to use the new process API and display before/after previews and metadata.
   - `frontend/src/types.ts`: Updated to include `ProcessResponse` and `ProcessMetadata` types.
   - `frontend/src/vite-env.d.ts`: Vite type declaration required for TypeScript CSS imports.
+  - `frontend/src/style.css`: Fixed header/footer, centered workflow/processing layout, compact spacing, report controls, and image constraints.
 - **Tests**:
   - `tests/test_process_api.py`: FastAPI test client suite for the image processing endpoint.
   - `tests/test_inference_api.py`: Missing-checkpoint and accepted-input-path behavior.
+  - `tests/test_calibration_condition.py`: Measurement conversion and condition-score semantics, including inverse monotonic scoring.
+  - `tests/test_report_service.py`: DOCX/PDF/PNG report generation and no-detection handling.
 
 ## 7. Important Decisions
 - **Hardware Constraints**: Local development must work without a GPU (target: AMD Ryzen 5 CPU). Local runtime must support CPU inference.
@@ -79,6 +92,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Calibration**: `backend/services/calibration_service.py` is retained for future use only. The physical calibration / physical-unit conversion component has already been implemented separately. It is intentionally excluded from the live UI and current inspection workflow because reliable physical scale cannot be guaranteed for arbitrary uploaded wall images. The live system therefore uses uncalibrated pixel-level measurements.
 - **Condition Assessment**: `backend/services/condition_service.py` is live and uses explainable, centralized project-defined prototype thresholds over pixel width, area, length, count, and confidence. Its condition score is bounded 0-10 with 10 representing best visible surface condition and 0 representing greatest visible damage; higher score means better condition. Categories are Mild, Moderate, and Severe. It reports visible surface condition only and is not a structural-safety standard.
 - **Reports**: `backend/services/report_service.py` generates reports only from the current live inspection payload in DOCX, PDF, and PNG formats. Reports contain pixel findings, condition assessment, limitations, and scope disclaimer; no physical calibration, RAG, or LLM content.
+- **Condition Score Semantics**: The raw damage severity components are normalized and inverted into the displayed condition score: `condition_score = 10 - normalized_damage_score`, clamped to 0-10. Configurable category cutoffs currently default to Mild at 7.5 or above and Moderate at 4.0 or above; these are project-defined prototype values, not engineering standards.
 - **Post-Processing Philosophy**: Mask cleanup is intentionally conservative. Small isolated regions may be removed by configurable threshold, but detections must not be hidden because they look unusual.
 
 ## 8. Environment & Run Instructions
@@ -95,10 +109,10 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Set `MODEL_PATH=models/best.pt` (must be a compatible YOLOv8 segmentation checkpoint), `YOLO_CONFIDENCE_THRESHOLD=0.25`, and `YOLO_IMAGE_SIZE=640` as needed.
   - Optional post-processing settings: `MASK_MIN_REGION_AREA_PX`, `MASK_CLOSING_KERNEL_SIZE`, and `MASK_CLOSING_ITERATIONS`.
   - Calibration settings remain available for deferred future use but are not part of the live workflow.
-  - Optional condition settings: `CONDITION_*_MM`, `CONDITION_*_MM2`, `CONDITION_*_PX`, `CONDITION_*_PX2`, confidence thresholds, and `CONDITION_UNCALIBRATED_SUPPORTED`.
+  - Optional condition settings: pixel thresholds, confidence thresholds, `CONDITION_MILD_MIN_SCORE`, `CONDITION_MODERATE_MIN_SCORE`, and `CONDITION_UNCALIBRATED_SUPPORTED`.
 
 ## 9. Testing Status
-- **Milestones**: Milestones 1-4 are implemented. Current phase modules are live pixel condition assessment and automated inspection reporting; physical calibration is implemented but deferred.
+- **Milestones**: Milestones 1-4 are implemented. Current phase modules, pixel condition assessment and automated inspection reporting, are implemented/live; physical calibration is implemented but deferred.
 - **Tests Implemented**: Existing quality/process/inference suites, `tests/test_measurement_services.py`, `tests/test_calibration_condition.py`, and `tests/test_report_service.py`.
 - **Latest Verification (2026-10-07)**:
   - `npm run build` passed.
@@ -107,6 +121,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Full suite completion was not verified because the process API suite exceeded the available verification window. The configured Python 3.11 environment now runs pytest; the bundled Python still lacks the project's `pydantic-settings` dependency for report smoke execution.
   - Focused condition, measurement, calibration, and report tests: 18 passed.
   - Quality regression tests: 6 passed.
+  - Frontend layout verification: `npm run build` passed after fixed header/footer, centered workflow/processing layout, dashboard/upload spacing, and image-size corrections.
   - The process API suite exceeded the available verification window and was stopped without an application failure result.
 - **Previous Tests Passed**: 13 / 13 before Milestone 4 changes.
 - **Tests Failed**: No application test failures observed in this run; full pytest execution was blocked by the local Python runtime mismatch.
@@ -122,7 +137,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Low-contrast image -> PASSED (status: pass/warning, preprocessed)
 
 ## 10. Known Problems / Blockers
-- Local Python verification blocker: `.venv` was created from `C:\Users\srich\AppData\Local\Python\pythoncore-3.11-64\python.exe`, but that interpreter is no longer available. Recreate the Python 3.11 environment and reinstall `requirements.txt` before running the full backend tests.
+- Full process/inference regression completion remains pending because the process API suite exceeded the available verification window. Focused condition, measurement, calibration, report, and quality suites pass.
 - Final heritage-specific model fine-tuning/evaluation is pending. The current local checkpoint remains a prototype and is intentionally not committed to Git.
 - The physical calibration module may not be available in every OpenCV build; it remains isolated and deferred. Physical measurements depend on a valid image-specific scale reference.
 
@@ -147,3 +162,4 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **2026-10-07**: Fixed backend startup when report-only dependencies are absent. DOCX/PDF/PNG libraries are now imported lazily during report generation, `python-docx` and `reportlab` are listed in `requirements.txt`, and the report endpoint returns a controlled error instead of preventing Uvicorn startup. `import backend.main` verified successfully.
 - **2026-10-07**: Fixed a live condition-response validation bug caused by positional dataclass construction after adding `measurement_mode`. Condition assessment results now use named fields and correctly return pixel mode plus preliminary status.
 - **2026-10-07**: Corrected condition-score semantics so the score is an inverse damage score: higher scores indicate better visible condition, lower scores indicate greater visible damage, and category cutoffs are configurable. Added monotonicity and bounded-score tests. Centered the workflow stepper and processing page, moderately reduced dashboard hero spacing, and preserved compact image limits in the frontend.
+- **2026-10-07**: Added explicit main-content bottom padding equal to the fixed 36px footer plus 24px clearance so dashboard workflow content remains visible above the footer.

@@ -17,7 +17,10 @@ Upload image
   → Quality gate (PASS / WARNING / FAIL)
   → Conditional preprocessing
   → YOLOv8-seg CPU inference
-  → Segmentation overlay and detection table
+  → Mask post-processing
+  → Pixel measurements
+  → Visible surface condition assessment
+  → DOCX / PDF / PNG inspection report
 ```
 
 A FAIL result stops preprocessing and inference. For usable images, the frontend automatically submits the processed image to inference and displays detected class, confidence, bounding box, segmentation mask, and overlay.
@@ -32,7 +35,14 @@ A FAIL result stops preprocessing and inference. For usable images, the frontend
 - Configurable local YOLOv8-seg checkpoint via `MODEL_PATH`
 - CPU inference, bounding boxes, confidence values, segmentation polygons/masks, and overlays
 - Multiple crack detections per image
+- Conservative mask cleanup and pixel-only crack length, width, area, maximum width, and orientation measurements
+- Rule-based Visible Surface Condition Assessment with Mild / Moderate / Severe categories
+- Bounded 0-10 condition score where higher scores indicate better visible condition
+- Automated reports generated from live inspection data in DOCX, PDF, and PNG formats
 - Frontend visualization of processed images and inference results
+- Fixed header/footer layout, centered workflow/processing views, and constrained inspection image sizes
+
+Physical calibration and physical-unit conversion are implemented separately but deferred. They are not invoked by the live workflow, displayed in the UI, or included in reports.
 
 ## Current Model
 
@@ -90,13 +100,12 @@ Open `http://localhost:5173`. The Vite development server proxies `/api` and `/u
 - `POST /api/quality-check` — quality assessment only
 - `POST /api/process-image` — quality gate and conditional preprocessing
 - `POST /api/run-inference` — YOLOv8-seg on an existing processed image
+- `POST /api/generate-report` — generate DOCX, PDF, and PNG reports from the current pixel-based inspection result
 - `GET /api/docs` — interactive API documentation
 
 ## Planned Modules
 
-- Segmentation-mask post-processing
-- Crack geometry and calibrated measurement
-- Inspection-level aggregation and wall condition assessment
+- Physical calibration and physical-unit conversion (implemented but deferred)
 - Supabase-backed inspection history
 - RAG decision support and LLM-based maintenance reports
 - Heritage-specific model fine-tuning and evaluation
