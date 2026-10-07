@@ -1,394 +1,181 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import type { QualityCheckResponse, HealthResponse, QualityStatus, ProcessResponse, InferenceResponse } from './types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { HealthResponse, InferenceResponse, ProcessResponse, QualityStatus } from './types'
 
 const API_BASE = '/api'
-
-// --- Health indicator ---
-
-function HealthStatus() {
-  const [health, setHealth] = useState<HealthResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch(`${API_BASE}/health`)
-      .then(r => r.json())
-      .then(setHealth)
-      .catch(() => setError('Backend unreachable'))
-  }, [])
-
-  if (error) {
-    return (
-      <div className="health-row">
-        <span className="health-dot health-dot--error" />
-        {error}
-      </div>
-    )
-  }
-
-  if (!health) {
-    return (
-      <div className="health-row">
-        <div className="spinner" style={{ marginRight: '0.5rem', width: '8px', height: '8px' }} />
-        Connecting to backend...
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <div className="health-row">
-        <span className="health-dot health-dot--ok" />
-        Backend v{health.version} — online
-      </div>
-      <div className="health-row">
-        <span className={`health-dot ${health.supabase_connected ? 'health-dot--ok' : 'health-dot--error'}`} />
-        Supabase: {health.supabase_connected ? 'connected' : 'not configured'}
-        {health.supabase_note && !health.supabase_connected && (
-          <span style={{ marginLeft: '6px', color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-            ({health.supabase_note})
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// --- Status badge ---
+const PROJECT_TITLE = 'AI-Based Wall Inspection System for Heritage Masonry'
+type View = 'home' | 'setup' | 'quality' | 'processing' | 'results'
+type ProcessingPhase = 'idle' | 'quality' | 'detection'
+const workflowSteps: Array<{ id: View; label: string; number: string }> = [
+  { id: 'setup', label: 'Setup', number: '01' },
+  { id: 'quality', label: 'Quality Check', number: '02' },
+  { id: 'processing', label: 'Detection', number: '03' },
+  { id: 'results', label: 'Results', number: '04' },
+]
 
 function StatusBadge({ status }: { status: QualityStatus }) {
-  const label = status.toUpperCase()
-  const cls = `status-badge status-badge--${status}`
-  return <span className={cls}>{label}</span>
+  return <span className={'status-badge status-badge--' + status}>{status.toUpperCase()}</span>
 }
-
-// --- Metric tile ---
+function HealthStatus() {
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [offline, setOffline] = useState(false)
+  useEffect(() => {
+    fetch(API_BASE + '/health')
+      .then(response => { if (!response.ok) throw new Error('Backend unavailable'); return response.json() })
+      .then(setHealth).catch(() => setOffline(true))
+  }, [])
+  if (offline) return <span className="system-status system-status--offline">Backend unavailable</span>
+  if (!health) return <span className="system-status">Checking backend</span>
+  return <span className="system-status system-status--online">Backend online · v{health.version}</span>
+}
 
 function MetricItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="metric-item">
-      <div className="metric-item__label">{label}</div>
-      <div className="metric-item__value">{value}</div>
-    </div>
-  )
+  return <div className="metric-item"><span>{label}</span><strong>{value}</strong></div>
 }
-
-// --- Upload icon (SVG) ---
-
 function UploadIcon() {
-  return (
-    <svg
-      className="upload-area__icon"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" y1="3" x2="12" y2="15" />
-    </svg>
-  )
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true"><path d="M20 16.5v2A2.5 2.5 0 0 1 17.5 21h-11A2.5 2.5 0 0 1 4 18.5v-2" /><path d="m8.5 9.5 3.5-3.5 3.5 3.5M12 6v10" /></svg>
 }
-
-// --- Main App ---
+function ArrowIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+}
 
 export default function App() {
+  const [view, setView] = useState<View>('home')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [phase, setPhase] = useState<ProcessingPhase>('idle')
   const [result, setResult] = useState<ProcessResponse | null>(null)
   const [inference, setInference] = useState<InferenceResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const resetInspection = useCallback((nextView: View = 'home') => {
+    setSelectedFile(null); setResult(null); setInference(null); setError(null); setPhase('idle')
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    setView(nextView)
+  }, [previewUrl])
+
   const handleFile = useCallback((file: File) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png']
-    if (!allowed.includes(file.type)) {
-      setError('Only JPG and PNG images are accepted.')
+    if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
+      setError('Only JPG and PNG images are accepted. Choose another image to continue.')
       return
     }
-    setSelectedFile(file)
-    setResult(null)
-    setInference(null)
-    setError(null)
     const url = URL.createObjectURL(file)
-    setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url })
+    setPreviewUrl(current => { if (current) URL.revokeObjectURL(current); return url })
+    setSelectedFile(file); setResult(null); setInference(null); setError(null); setPhase('idle'); setView('setup')
   }, [])
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleFile(file)
-  }
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleFile(file)
-  }
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setDragOver(true)
-  }
-
-  const handleDragLeave = () => setDragOver(false)
-
-  const clearSelection = () => {
-    setSelectedFile(null)
-    setResult(null)
-    setInference(null)
-    setError(null)
-    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
   const runProcessing = async () => {
-    if (!selectedFile) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
-    setInference(null)
-
+    if (!selectedFile) { setError('Choose an image before starting the inspection.'); return }
+    setLoading(true); setError(null); setResult(null); setInference(null); setPhase('quality'); setView('processing')
     try {
       const formData = new FormData()
       formData.append('image', selectedFile)
-
-      const response = await fetch(`${API_BASE}/process-image`, {
-        method: 'POST',
-        body: formData,
+      const processResponse = await fetch(API_BASE + '/process-image', { method: 'POST', body: formData })
+      if (!processResponse.ok) {
+        const detail = await processResponse.json().catch(() => ({}))
+        throw new Error(detail?.detail ?? ('Server error ' + processResponse.status))
+      }
+      const processData: ProcessResponse = await processResponse.json()
+      setResult(processData)
+      if (!processData.processed_image_url) { setView('quality'); return }
+      setPhase('detection')
+      const inferenceResponse = await fetch(API_BASE + '/run-inference', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processed_image_url: processData.processed_image_url }),
       })
-
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}))
-        throw new Error(detail?.detail ?? `Server error ${response.status}`)
+      if (!inferenceResponse.ok) {
+        const detail = await inferenceResponse.json().catch(() => ({}))
+        throw new Error(detail?.detail ?? ('Inference server error ' + inferenceResponse.status))
       }
-
-      const data: ProcessResponse = await response.json()
-      setResult(data)
-
-      // Inference deliberately consumes the image returned by the existing
-      // preprocessing endpoint; it never re-runs quality checks or enhancement.
-      if (data.processed_image_url) {
-        const inferenceResponse = await fetch(`${API_BASE}/run-inference`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ processed_image_url: data.processed_image_url }),
-        })
-        if (!inferenceResponse.ok) {
-          const detail = await inferenceResponse.json().catch(() => ({}))
-          throw new Error(detail?.detail ?? `Inference server error ${inferenceResponse.status}`)
-        }
-        const inferenceData: InferenceResponse = await inferenceResponse.json()
-        setInference(inferenceData)
-      }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
-    } finally {
-      setLoading(false)
-    }
+      setInference(await inferenceResponse.json())
+      setView('results')
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : 'An unexpected error occurred.')
+      setView('setup')
+    } finally { setLoading(false); setPhase('idle') }
   }
 
-  return (
-    <>
-      <header className="app-header">
-        <div className="app-header__inner">
-          <div>
-            <div className="app-header__title">AWIS-HM</div>
-            <div className="app-header__subtitle">
-              AI-Based Wall Inspection System for Heritage Masonry
-            </div>
-          </div>
-        </div>
-      </header>
+  const imageUrl = (url: string) => API_BASE.replace('/api', '') + url
+  const qualityFailed = result?.quality_result.status === 'fail'
+  const canVisit = (target: View) => target === 'home' || target === 'setup'
+    || (target === 'quality' && Boolean(result))
+    || (target === 'processing' && loading)
+    || (target === 'results' && Boolean(result && inference))
+  const stageClass = (target: View) => {
+    const complete = (target === 'setup' && Boolean(selectedFile)) || (target === 'quality' && Boolean(result))
+      || (target === 'processing' && Boolean(inference)) || (target === 'results' && view === 'results')
+    return 'workflow-nav__button' + (view === target ? ' is-active' : '') + (complete ? ' is-complete' : '')
+  }
 
-      <main className="app-main">
-        <div className="page-container">
+  const workflow = <nav className="workflow-nav" aria-label="Inspection workflow">{workflowSteps.map((step, index) => (
+    <div className="workflow-nav__item" key={step.id}>
+      <button className={stageClass(step.id)} type="button" disabled={!canVisit(step.id)} onClick={() => setView(step.id)}><span>{stageClass(step.id).includes('is-complete') ? '✓' : step.number}</span>{step.label}</button>
+      {index < workflowSteps.length - 1 && <i className="workflow-nav__line" aria-hidden="true" />}
+    </div>
+  ))}</nav>
 
-          {/* System status */}
-          <div className="card">
-            <div className="card__title">System Status</div>
-            <HealthStatus />
-          </div>
+  const home = <section className="home-page">
+    <div className="hero-panel">
+      <div className="eyebrow">Visible-surface inspection assistance</div>
+      <h1>Inspect masonry images with a clear, evidence-led workflow.</h1>
+      <p>Upload a wall image, review its suitability, and view segmentation detections from the configured local model.</p>
+      <div className="hero-panel__actions"><button className="btn btn--primary" type="button" onClick={() => resetInspection('setup')}>Start new inspection <ArrowIcon /></button><HealthStatus /></div>
+    </div>
+    <div className="home-grid">
+      <section className="info-panel"><div className="section-kicker">Current workflow</div><h2>From image to visible detection output</h2><ol className="workflow-list">
+        <li><b>1</b><span><strong>Upload</strong> JPG or PNG wall imagery.</span></li><li><b>2</b><span><strong>Quality check</strong> Review blur, exposure, contrast, and resolution.</span></li><li><b>3</b><span><strong>Enhancement</strong> Process usable imagery only.</span></li><li><b>4</b><span><strong>Detection</strong> View segmentation overlay and model output.</span></li>
+      </ol></section>
+      <aside className="scope-panel"><div className="section-kicker">Scope</div><p>Results describe visible image features only. They do not assess hidden damage or certify structural safety.</p></aside>
+    </div>
+  </section>
 
-          {/* Image upload */}
-          <div className="card">
-            <div className="card__title">Image Upload</div>
+  const setup = <section className="page-section">
+    <div className="page-heading"><div><div className="eyebrow">New inspection</div><h1>Image upload and setup</h1><p>Select a clear image of the wall surface to begin the inspection workflow.</p></div><button className="text-button" type="button" onClick={() => resetInspection('home')}>Back to dashboard</button></div>
+    {error && <div className="error-message" role="alert">{error}</div>}
+    <div className="upload-panel">
+      {!selectedFile ? <div className={'upload-area' + (dragOver ? ' upload-area--drag-over' : '')} onDrop={event => {
+        event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files[0]; if (file) handleFile(file)
+      }} onDragOver={event => { event.preventDefault(); setDragOver(true) }} onDragLeave={() => setDragOver(false)} onClick={() => fileInputRef.current?.click()} role="button" aria-label="Select image to inspect" tabIndex={0} onKeyDown={event => event.key === 'Enter' && fileInputRef.current?.click()}>
+        <UploadIcon /><strong>Select or drop an image</strong><span>JPG or PNG · up to 20 MB</span>
+        <input ref={fileInputRef} type="file" accept="image/jpeg,image/jpg,image/png" onChange={event => { const file = event.target.files?.[0]; if (file) handleFile(file) }} hidden />
+      </div> : <div className="selected-image">
+        <img src={previewUrl ?? ''} alt="Selected wall image" /><div className="selected-image__details"><div><div className="section-kicker">Selected image</div><h2>{selectedFile.name}</h2><p>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Ready for quality assessment</p></div><div className="button-row"><button className="btn btn--primary" type="button" onClick={runProcessing} disabled={loading}>Begin inspection <ArrowIcon /></button><button className="btn btn--secondary" type="button" onClick={() => resetInspection('setup')} disabled={loading}>Clear image</button></div></div>
+      </div>}
+    </div>
+    <p className="helper-text">The quality gate reviews the uploaded image before any enhancement or model inference is performed.</p>
+  </section>
 
-            {!selectedFile ? (
-              <div
-                className={`upload-area${dragOver ? ' upload-area--drag-over' : ''}`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-                role="button"
-                aria-label="Upload image"
-                tabIndex={0}
-                onKeyDown={e => e.key === 'Enter' && fileInputRef.current?.click()}
-              >
-                <label className="upload-area__label" htmlFor="image-upload">
-                  <UploadIcon />
-                  <span className="upload-area__primary">
-                    Select or drop an image
-                  </span>
-                  <span className="upload-area__secondary">
-                    JPG or PNG, up to 20 MB
-                  </span>
-                </label>
-                <input
-                  id="image-upload"
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/jpg,image/png"
-                  onChange={handleInputChange}
-                  style={{ display: 'none' }}
-                />
-              </div>
-            ) : (
-              <div className="image-preview">
-                <img
-                  src={previewUrl ?? ''}
-                  alt="Selected wall image"
-                  className="image-preview__img"
-                />
-                <div className="image-preview__filename">
-                  {selectedFile.name} &mdash; {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                  <button
-                    id="btn-process-image"
-                    className="btn btn--primary"
-                    onClick={runProcessing}
-                    disabled={loading}
-                  >
-                    {loading ? <><div className="spinner" />Processing and running inference...</> : 'Process Image'}
-                  </button>
-                  <button
-                    id="btn-clear"
-                    className="btn btn--secondary"
-                    onClick={clearSelection}
-                    disabled={loading}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+  const quality = result && <section className="page-section">
+    <div className="page-heading"><div><div className="eyebrow">Inspection quality</div><h1>Quality check result</h1><p>The quality check evaluates the uploaded image; it does not modify it.</p></div><div className="button-row"><button className="text-button" type="button" onClick={() => setView('setup')}>Back to setup</button><button className="text-button" type="button" onClick={() => resetInspection('setup')}>Choose another image</button></div></div>
+    <section className="quality-summary"><div className="quality-summary__status"><StatusBadge status={result.quality_result.status} /><div><h2>{qualityFailed ? 'A new image is needed' : 'Image can continue through the workflow'}</h2><p>{result.quality_result.explanation}</p></div></div><div className="quality-summary__recommendation">{result.quality_result.recommendation}</div></section>
+    <div className="metrics-grid"><MetricItem label="Resolution" value={result.quality_result.metrics.width + ' × ' + result.quality_result.metrics.height + ' px'} /><MetricItem label="Blur score" value={result.quality_result.metrics.blur_score.toFixed(1)} /><MetricItem label="Brightness" value={result.quality_result.metrics.brightness_mean.toFixed(1)} /><MetricItem label="Contrast" value={result.quality_result.metrics.contrast_std.toFixed(1)} /></div>
+    <div className="page-actions">{qualityFailed ? <button className="btn btn--primary" type="button" onClick={() => resetInspection('setup')}>Choose another image <ArrowIcon /></button> : inference ? <button className="btn btn--primary" type="button" onClick={() => setView('results')}>View detection results <ArrowIcon /></button> : <button className="btn btn--primary" type="button" onClick={runProcessing}>Run detection <ArrowIcon /></button>}</div>
+  </section>
 
-          {/* Error */}
-          {error && (
-            <div className="error-message" role="alert">
-              {error}
-            </div>
-          )}
+  const processing = <section className="page-section processing-page">
+    <div className="page-heading"><div><div className="eyebrow">Inspection in progress</div><h1>Processing and detection</h1><p>Completed stages are shown as soon as the application receives their result.</p></div></div>
+    <div className="processing-track" aria-live="polite">
+      <div className={result ? 'is-complete' : phase === 'quality' ? 'is-active' : ''}><span>1</span><strong>Quality check</strong><small>{result ? 'Complete' : phase === 'quality' ? 'Running' : 'Waiting'}</small></div>
+      <div className={result?.metadata ? 'is-complete' : ''}><span>2</span><strong>Enhancement</strong><small>{result?.metadata ? 'Complete' : 'Waiting'}</small></div>
+      <div className={inference ? 'is-complete' : phase === 'detection' ? 'is-active' : ''}><span>3</span><strong>Detection</strong><small>{inference ? 'Complete' : phase === 'detection' ? 'Running' : 'Waiting'}</small></div>
+    </div>
+    <div className="processing-note"><div className="spinner" /><div><strong>{phase === 'detection' ? 'Running segmentation inference' : 'Reviewing image quality'}</strong><p>Please keep this page open while the current step completes.</p></div></div>
+  </section>
 
-          {/* Quality check result */}
-          {result && (
-            <div className="card" id="quality-result-card">
-              <div className="card__title">Quality Check Result</div>
-              <div className="quality-result">
-                <div className="quality-result__header">
-                  <StatusBadge status={result.quality_result.status} />
-                </div>
-                <p className="quality-result__explanation">{result.quality_result.explanation}</p>
-                <div className="quality-result__recommendation">{result.quality_result.recommendation}</div>
-                <div className="metrics-grid">
-                  <MetricItem label="Width" value={`${result.quality_result.metrics.width} px`} />
-                  <MetricItem label="Height" value={`${result.quality_result.metrics.height} px`} />
-                  <MetricItem label="Blur score" value={result.quality_result.metrics.blur_score.toFixed(1)} />
-                  <MetricItem label="Brightness" value={result.quality_result.metrics.brightness_mean.toFixed(1)} />
-                  <MetricItem label="Contrast" value={result.quality_result.metrics.contrast_std.toFixed(1)} />
-                  <MetricItem label="File size" value={`${result.quality_result.metrics.file_size_mb.toFixed(2)} MB`} />
-                </div>
-                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                  Note: quality thresholds are configurable provisional values and are not scientifically validated limits.
-                </p>
-              </div>
-            </div>
-          )}
+  const results = result && inference && <section className="page-section">
+    <div className="page-heading"><div><div className="eyebrow">Inspection output</div><h1>Segmentation results</h1><p>Review the processed image and model output. Results refer only to visible surface features in this image.</p></div><div className="button-row"><button className="text-button" type="button" onClick={() => setView('quality')}>Quality check</button><button className="text-button" type="button" onClick={() => resetInspection('setup')}>Start over</button></div></div>
+    <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Image review</div><h2>Original and processed image</h2></div></div><div className="image-comparison"><figure><img src={imageUrl(result.original_image_url)} alt="Original wall image" /><figcaption>Original image</figcaption></figure>{result.processed_image_url && <figure><img src={imageUrl(result.processed_image_url)} alt="Processed wall image" /><figcaption>Processed image</figcaption></figure>}</div>{result.metadata && <p className="operations-note">Applied operations: {result.metadata.operations_applied.join(', ')}.</p>}</section>
+    <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Detection output</div><h2>Segmentation overlay</h2></div></div>{inference.status === 'model_not_available' ? <div className="state-notice state-notice--warning"><strong>Model not available</strong><p>{inference.message}</p><code>{inference.model_path}</code></div> : <>{inference.overlay_image_url && <img className="inference-overlay" src={imageUrl(inference.overlay_image_url)} alt="Segmentation overlay" />}<div className="detection-summary"><strong>{inference.detections.length}</strong><span>{inference.detections.length === 1 ? 'detection returned' : 'detections returned'}</span><p>{inference.message}</p></div></>}</section>
+    {inference.status === 'completed' && <section className="result-section"><div className="result-section__heading"><div><div className="section-kicker">Detection details</div><h2>Model detections</h2></div></div>{inference.detections.length === 0 ? <div className="state-notice"><strong>No detections found</strong><p>The model completed inference but did not return a detection for this image. You can choose another image or review the quality check.</p></div> : <div className="detections-table-wrap"><table className="detections-table"><thead><tr><th>Class</th><th>Confidence</th><th>Bounding box (px)</th><th>Mask</th></tr></thead><tbody>{inference.detections.map((detection, index) => <tr key={detection.class_id + '-' + index}><td>{detection.class_name}</td><td>{(detection.confidence * 100).toFixed(1)}%</td><td>{detection.bounding_box.x1 + ', ' + detection.bounding_box.y1 + ' – ' + detection.bounding_box.x2 + ', ' + detection.bounding_box.y2}</td><td><a href={imageUrl(detection.segmentation_mask.mask_url)} target="_blank" rel="noreferrer">Open mask</a></td></tr>)}</tbody></table></div>}</section>}
+  </section>
 
-          {/* Processing result */}
-          {result?.metadata && result?.processed_image_url && (
-            <div className="card" id="process-result-card">
-              <div className="card__title">Processing Result</div>
-              <div className="process-result">
-                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                  <div style={{ flex: 1, minWidth: '300px' }}>
-                    <strong>Original</strong>
-                    <img src={API_BASE.replace('/api', '') + result.original_image_url} alt="Original" style={{ width: '100%', borderRadius: '4px', marginTop: '0.5rem' }} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: '300px' }}>
-                    <strong>Processed</strong>
-                    <img src={API_BASE.replace('/api', '') + result.processed_image_url} alt="Processed" style={{ width: '100%', borderRadius: '4px', marginTop: '0.5rem' }} />
-                  </div>
-                </div>
-                <div style={{ marginTop: '1rem' }}>
-                  <strong>Applied Operations:</strong>
-                  <ul>
-                    {result.metadata.operations_applied.map((op, idx) => (
-                      <li key={idx} style={{ fontFamily: 'monospace' }}>{op}</li>
-                    ))}
-                  </ul>
-                  <div style={{ fontSize: 'var(--font-size-sm)', marginTop: '0.5rem' }}>
-                    Original Size: {result.metadata.original_size[0]}x{result.metadata.original_size[1]} | 
-                    Processed Size: {result.metadata.processed_size[0]}x{result.metadata.processed_size[1]}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* YOLOv8 segmentation result */}
-          {inference && (
-            <div className="card" id="inference-result-card">
-              <div className="card__title">YOLO Segmentation Result</div>
-              {inference.status === 'model_not_available' ? (
-                <div className="inference-notice" role="status">
-                  <strong>Model not available</strong>
-                  <p>{inference.message}</p>
-                  <p className="inference-notice__path">Configured path: {inference.model_path}</p>
-                </div>
-              ) : (
-                <div className="inference-result">
-                  <p className="quality-result__explanation">{inference.message}</p>
-                  {inference.overlay_image_url && (
-                    <img
-                      src={API_BASE.replace('/api', '') + inference.overlay_image_url}
-                      alt="YOLO segmentation overlay"
-                      className="inference-overlay"
-                    />
-                  )}
-                  {inference.detections.length > 0 && (
-                    <div className="detections-table-wrap">
-                      <table className="detections-table">
-                        <thead>
-                          <tr><th>Class</th><th>Confidence</th><th>Bounding box (px)</th><th>Mask</th></tr>
-                        </thead>
-                        <tbody>
-                          {inference.detections.map((detection, index) => (
-                            <tr key={`${detection.class_id}-${index}`}>
-                              <td>{detection.class_name}</td>
-                              <td>{(detection.confidence * 100).toFixed(1)}%</td>
-                              <td>{`${detection.bounding_box.x1}, ${detection.bounding_box.y1} – ${detection.bounding_box.x2}, ${detection.bounding_box.y2}`}</td>
-                              <td><a href={API_BASE.replace('/api', '') + detection.segmentation_mask.mask_url} target="_blank" rel="noreferrer">View mask</a></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-        </div>
-      </main>
-    </>
-  )
+  return <div className="app-shell">
+    <header className="app-header"><div className="app-header__inner"><button className="brand" type="button" onClick={() => setView('home')} aria-label="Open dashboard"><span className="brand__mark" aria-hidden="true">HM</span><span>{PROJECT_TITLE}</span></button><nav className="header-nav" aria-label="Primary navigation"><button type="button" className={view === 'home' ? 'is-active' : ''} onClick={() => setView('home')}>Dashboard</button><button type="button" className={view === 'setup' ? 'is-active' : ''} onClick={() => resetInspection('setup')}>New inspection</button></nav></div></header>
+    <main className="app-main"><div className="page-container">{view !== 'home' && workflow}{view === 'home' && home}{view === 'setup' && setup}{view === 'quality' && quality}{view === 'processing' && processing}{view === 'results' && results}</div></main>
+    <footer className="app-footer">By 23331A0599, 23331A05A0, 23331A05A4, 23331A05A9</footer>
+  </div>
 }
