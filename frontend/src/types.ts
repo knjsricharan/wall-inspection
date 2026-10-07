@@ -37,3 +37,31 @@ export interface ProcessResponse {
   processed_image_url: string | null
   metadata: ProcessMetadata | null
 }
+
+export interface BoundingBox {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+export interface SegmentationMask {
+  polygon: number[][]
+  mask_url: string
+}
+
+export interface Detection {
+  class_id: number
+  class_name: string
+  confidence: number
+  bounding_box: BoundingBox
+  segmentation_mask: SegmentationMask
+}
+
+export interface InferenceResponse {
+  status: 'completed' | 'model_not_available'
+  message: string
+  model_path: string
+  overlay_image_url: string | null
+  detections: Detection[]
+}

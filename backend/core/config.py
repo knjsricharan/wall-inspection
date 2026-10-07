@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # Storage
     upload_dir: str = "uploads"
 
+    # YOLOv8 segmentation inference. The checkpoint is deliberately external to
+    # the source tree so a trained heritage-masonry model can replace it later.
+    model_path: str = "models/best.pt"
+    yolo_confidence_threshold: float = 0.25
+    yolo_image_size: int = 640
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

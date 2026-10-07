@@ -12,6 +12,7 @@ from backend.core.config import get_settings
 from backend.api.health import router as health_router
 from backend.api.quality import router as quality_router
 from backend.api.process import router as process_router
+from backend.api.inference import router as inference_router
 from fastapi.staticfiles import StaticFiles
 
 # Configure logging — no emojis in log output
@@ -52,6 +53,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(quality_router, prefix="/api", tags=["quality"])
 app.include_router(process_router, prefix="/api", tags=["process"])
+app.include_router(inference_router, prefix="/api", tags=["inference"])
 
 
 logger.info("AWIS-HM backend started — version %s", settings.app_version)

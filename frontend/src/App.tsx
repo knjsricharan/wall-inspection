@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { QualityCheckResponse, HealthResponse, QualityStatus, ProcessResponse } from './types'
+import type { QualityCheckResponse, HealthResponse, QualityStatus, ProcessResponse, InferenceResponse } from './types'
 
 const API_BASE = '/api'
 
@@ -100,6 +100,7 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ProcessResponse | null>(null)
+  const [inference, setInference] = useState<InferenceResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -111,6 +112,7 @@ export default function App() {
     }
     setSelectedFile(file)
     setResult(null)
+    setInference(null)
     setError(null)
     const url = URL.createObjectURL(file)
     setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url })
@@ -138,6 +140,7 @@ export default function App() {
   const clearSelection = () => {
     setSelectedFile(null)
     setResult(null)
+    setInference(null)
     setError(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -148,6 +151,7 @@ export default function App() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setInference(null)
 
     try {
       const formData = new FormData()
@@ -165,6 +169,22 @@ export default function App() {
 
       const data: ProcessResponse = await response.json()
       setResult(data)
+
+      // Inference deliberately consumes the image returned by the existing
+      // preprocessing endpoint; it never re-runs quality checks or enhancement.
+      if (data.processed_image_url) {
+        const inferenceResponse = await fetch(`${API_BASE}/run-inference`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ processed_image_url: data.processed_image_url }),
+        })
+        if (!inferenceResponse.ok) {
+          const detail = await inferenceResponse.json().catch(() => ({}))
+          throw new Error(detail?.detail ?? `Inference server error ${inferenceResponse.status}`)
+        }
+        const inferenceData: InferenceResponse = await inferenceResponse.json()
+        setInference(inferenceData)
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
     } finally {
@@ -245,7 +265,7 @@ export default function App() {
                     onClick={runProcessing}
                     disabled={loading}
                   >
-                    {loading ? <><div className="spinner" />Processing...</> : 'Process Image'}
+                    {loading ? <><div className="spinner" />Processing and running inference...</> : 'Process Image'}
                   </button>
                   <button
                     id="btn-clear"
@@ -320,6 +340,50 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* YOLOv8 segmentation result */}
+          {inference && (
+            <div className="card" id="inference-result-card">
+              <div className="card__title">YOLO Segmentation Result</div>
+              {inference.status === 'model_not_available' ? (
+                <div className="inference-notice" role="status">
+                  <strong>Model not available</strong>
+                  <p>{inference.message}</p>
+                  <p className="inference-notice__path">Configured path: {inference.model_path}</p>
+                </div>
+              ) : (
+                <div className="inference-result">
+                  <p className="quality-result__explanation">{inference.message}</p>
+                  {inference.overlay_image_url && (
+                    <img
+                      src={API_BASE.replace('/api', '') + inference.overlay_image_url}
+                      alt="YOLO segmentation overlay"
+                      className="inference-overlay"
+                    />
+                  )}
+                  {inference.detections.length > 0 && (
+                    <div className="detections-table-wrap">
+                      <table className="detections-table">
+                        <thead>
+                          <tr><th>Class</th><th>Confidence</th><th>Bounding box (px)</th><th>Mask</th></tr>
+                        </thead>
+                        <tbody>
+                          {inference.detections.map((detection, index) => (
+                            <tr key={`${detection.class_id}-${index}`}>
+                              <td>{detection.class_name}</td>
+                              <td>{(detection.confidence * 100).toFixed(1)}%</td>
+                              <td>{`${detection.bounding_box.x1}, ${detection.bounding_box.y1} – ${detection.bounding_box.x2}, ${detection.bounding_box.y2}`}</td>
+                              <td><a href={API_BASE.replace('/api', '') + detection.segmentation_mask.mask_url} target="_blank" rel="noreferrer">View mask</a></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
