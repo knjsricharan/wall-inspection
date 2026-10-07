@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     yolo_confidence_threshold: float = 0.25
     yolo_image_size: int = 640
 
+    # Conservative mask cleanup for measurement. These project-defined defaults
+    # remove tiny isolated specks and bridge very small gaps without reshaping
+    # the crack geometry aggressively.
+    mask_min_region_area_px: int = 20
+    mask_closing_kernel_size: int = 3
+    mask_closing_iterations: int = 1
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

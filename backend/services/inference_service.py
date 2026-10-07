@@ -13,8 +13,11 @@ from backend.schemas.inference import (
     BoundingBox,
     Detection,
     InferenceResponse,
+    MeasurementSummary,
     SegmentationMask,
 )
+from backend.services.measurement_service import measure_crack_mask, summarize_measurements
+from backend.services.postprocess_service import postprocess_mask
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,9 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
         raise RuntimeError(f"YOLO inference failed: {exc}") from exc
 
     overlay = image.copy()
+    measurement_overlay = image.copy()
     detections: list[Detection] = []
+    measurements = []
     timestamp = int(time.time() * 1000)
     base_name = os.path.splitext(filename)[0]
 
@@ -132,15 +137,37 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
             mask_path = os.path.join(settings.upload_dir, mask_filename)
             cv2.imwrite(mask_path, binary_mask * 255)
 
+            cleaned_mask = postprocess_mask(binary_mask, image.shape[:2])
+            cleaned_mask_filename = f"{timestamp}_cleaned_mask_{index}_{base_name}.png"
+            cleaned_mask_path = os.path.join(settings.upload_dir, cleaned_mask_filename)
+            cv2.imwrite(cleaned_mask_path, cleaned_mask * 255)
+            measurement = measure_crack_mask(cleaned_mask)
+            measurements.append(measurement)
+
             color = _color_for_class(class_id)
             overlay[binary_mask.astype(bool)] = (
                 0.55 * overlay[binary_mask.astype(bool)] + 0.45 * np.array(color)
             ).astype(np.uint8)
+            measurement_overlay[cleaned_mask.astype(bool)] = (
+                0.45 * measurement_overlay[cleaned_mask.astype(bool)] + 0.55 * np.array(color)
+            ).astype(np.uint8)
             cv2.rectangle(overlay, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            cv2.rectangle(measurement_overlay, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             label = f"{class_names[class_id]} {confidence:.2f}"
             cv2.putText(overlay, label, (int(x1), max(18, int(y1) - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+            measurement_label = f"L {measurement.length_px:.1f}px W {measurement.width_px:.1f}px"
+            cv2.putText(
+                measurement_overlay,
+                measurement_label,
+                (int(x1), min(image.shape[0] - 8, max(18, int(y2) + 18))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
+            )
 
             detections.append(Detection(
+                detection_id=index,
                 class_id=class_id,
                 class_name=str(class_names[class_id]),
                 confidence=confidence,
@@ -148,15 +175,28 @@ def run_inference(processed_image_url: str) -> InferenceResponse:
                 segmentation_mask=SegmentationMask(
                     polygon=polygon,
                     mask_url=f"/uploads/{mask_filename}",
+                    cleaned_mask_url=f"/uploads/{cleaned_mask_filename}",
                 ),
+                length_px=measurement.length_px,
+                width_px=measurement.width_px,
+                max_width_px=measurement.max_width_px,
+                area_px2=measurement.area_px2,
+                orientation_deg=measurement.orientation_deg,
+                measurement_unit=measurement.measurement_unit,
+                calibrated=measurement.calibrated,
             ))
 
     overlay_filename = f"{timestamp}_overlay_{base_name}.jpg"
+    measurement_overlay_filename = f"{timestamp}_measurement_overlay_{base_name}.jpg"
     cv2.imwrite(os.path.join(settings.upload_dir, overlay_filename), overlay)
+    cv2.imwrite(os.path.join(settings.upload_dir, measurement_overlay_filename), measurement_overlay)
+    summary = summarize_measurements(measurements)
     return InferenceResponse(
         status="completed",
         message=(f"Inference completed with {len(detections)} detection(s)." if detections else "Inference completed with no detections."),
         model_path=settings.model_path,
         overlay_image_url=f"/uploads/{overlay_filename}",
+        measurement_overlay_url=f"/uploads/{measurement_overlay_filename}",
+        measurement_summary=MeasurementSummary(**summary),
         detections=detections,
     )

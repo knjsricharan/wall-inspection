@@ -48,14 +48,32 @@ export interface BoundingBox {
 export interface SegmentationMask {
   polygon: number[][]
   mask_url: string
+  cleaned_mask_url: string | null
 }
 
 export interface Detection {
+  detection_id: number | null
   class_id: number
   class_name: string
   confidence: number
   bounding_box: BoundingBox
   segmentation_mask: SegmentationMask
+  length_px: number | null
+  width_px: number | null
+  max_width_px: number | null
+  area_px2: number | null
+  orientation_deg: number | null
+  measurement_unit: string | null
+  calibrated: boolean | null
+}
+
+export interface MeasurementSummary {
+  detected_cracks: number
+  total_area_px2: number
+  total_length_px: number
+  max_width_px: number
+  measurement_unit: string
+  calibrated: boolean
 }
 
 export interface InferenceResponse {
@@ -63,5 +81,7 @@ export interface InferenceResponse {
   message: string
   model_path: string
   overlay_image_url: string | null
+  measurement_overlay_url: string | null
+  measurement_summary: MeasurementSummary | null
   detections: Detection[]
 }

@@ -8,7 +8,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Backend Orchestrator**: FastAPI handling API requests and workflow. (Running via Uvicorn)
 - **Image Pipeline**: Quality check and conditional preprocessing implemented using OpenCV.
 - **AI Inference**: YOLOv8-seg CPU inference is implemented and runtime verified with a real local crack-segmentation checkpoint.
-- **Post-Processing & Measurement**: Not implemented yet.
+- **Post-Processing & Measurement**: Implemented for YOLO segmentation masks with conservative cleanup and uncalibrated pixel measurements.
 - **Database**: Supabase client initialized and tested.
 - **RAG Layer**: Not implemented yet.
 
@@ -28,19 +28,19 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **RAG System**: Not Started
 
 ## 5. Current Milestone
-**MILESTONE 3 — AI INFERENCE — COMPLETED AND RUNTIME VERIFIED**
-- **Objective**: Run a configurable local YOLOv8-seg checkpoint on the existing processed image and display its result.
+**MILESTONE 4 — COMPUTER VISION POST-PROCESSING AND DAMAGE MEASUREMENT — IMPLEMENTED**
+- **Objective**: Clean YOLO segmentation masks conservatively and calculate uncalibrated pixel measurements for crack detections.
 - **Work Completed**:
-  - Configurable `MODEL_PATH` (default `models/best.pt`), confidence threshold, and image size.
-  - `POST /api/run-inference` consumes only the processed image URL from `/api/process-image`, loads a cached Ultralytics YOLOv8-seg model, and explicitly uses CPU inference.
-  - Response includes detected class, confidence, xyxy box, segmentation polygon, mask URL, and overlay URL.
-  - Missing weights return explicit `model_not_available` with no fabricated prediction.
-  - The frontend automatically chains process → inference and displays the overlay/detection table or unavailable-model message.
-  - Python 3.11 virtual environment and runtime dependencies are working.
-  - Runtime flow was verified with a real YOLOv8-seg crack-segmentation checkpoint, including multiple crack detections, masks, and overlay output.
-  - Current model selected for continued local development: YOLOv8m with `{0: "crack"}`.
-- **Work Remaining**: Begin Milestone 4: computer-vision post-processing and damage measurement.
-- **Limitations**: The YOLOv8m checkpoint is only a prototype/integration model, not a final heritage-trained AWIS-HM model. Heritage-specific fine-tuning and formal evaluation are still pending; no final accuracy metrics are claimed.
+  - Added a separate mask post-processing service for binary mask validation, small-region removal, and small-gap closing.
+  - Added a separate measurement service for area, skeleton length, distance-transform width, maximum width, and PCA-based orientation.
+  - Extended `POST /api/run-inference` so the existing inference flow now performs post-processing and measurement after YOLO segmentation.
+  - Preserved existing response fields: detection class, confidence, bounding box, raw mask URL, polygon, and overlay URL.
+  - Added per-detection measurement fields and a response-level measurement summary.
+  - Added cleaned mask files and a measurement overlay without replacing the existing detection overlay.
+  - Updated the frontend Results page to show uncalibrated pixel measurements and cleaned-mask links only when returned by the backend.
+  - Added synthetic-mask unit tests and an inference API regression test using a fake deterministic model result.
+- **Work Remaining**: Runtime verification with the local YOLO checkpoint after Python 3.11 is restored. Begin Milestone 5 only after measurement tests pass in the repaired environment.
+- **Limitations**: Measurements are uncalibrated pixel values only. Physical mm/mm² calibration is pending. The YOLOv8m checkpoint remains a prototype/integration model, not a final heritage-trained AWIS-HM model; no final accuracy metrics are claimed.
 
 ## 6. What Was Built
 - **Backend**:
@@ -49,8 +49,10 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - `backend/services/process_service.py`: Image preprocessing pipeline using OpenCV.
   - `backend/schemas/process.py`: Pydantic schemas for process responses and metadata.
   - `backend/api/inference.py`: `POST /api/run-inference`.
-  - `backend/services/inference_service.py`: Cached CPU YOLO loading, inference, overlay/mask output, and processed-image URL validation.
-  - `backend/schemas/inference.py`: Inference API schemas.
+  - `backend/services/inference_service.py`: Cached CPU YOLO loading, inference, overlay/mask output, cleaned-mask output, measurement overlay output, pixel measurement integration, and processed-image URL validation.
+  - `backend/services/postprocess_service.py`: Conservative binary segmentation mask cleanup.
+  - `backend/services/measurement_service.py`: Uncalibrated crack area, skeleton length, distance-transform width, maximum width, and orientation measurement.
+  - `backend/schemas/inference.py`: Inference and measurement API schemas.
 - **Frontend**:
   - `frontend/src/App.tsx`: Updated to use the new process API and display before/after previews and metadata.
   - `frontend/src/types.ts`: Updated to include `ProcessResponse` and `ProcessMetadata` types.
@@ -73,6 +75,8 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Inference Input**: YOLO only accepts a local `/uploads/...` image returned by the processing route. It does not repeat quality checking or preprocessing.
 - **Model Honesty**: The absence of a checkpoint is a visible `model_not_available` state. An empty detection list means a model actually ran and detected nothing.
 - **Prototype Behaviour**: The generic crack prototype can detect multiple cracks in one image, but may produce false positives on non-real/artificial crack imagery. This is expected and must not be presented as final heritage-model performance.
+- **Measurement Units**: Milestone 4 measurements are pixel-only and must return `measurement_unit: "pixel"` with `calibrated: false`. Do not convert to mm/mm² until a real calibration workflow exists.
+- **Post-Processing Philosophy**: Mask cleanup is intentionally conservative. Small isolated regions may be removed by configurable threshold, but detections must not be hidden because they look unusual.
 
 ## 8. Environment & Run Instructions
 - **Frontend**:
@@ -86,12 +90,18 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **Environment Variables**:
   - Copy `.env.example` to `.env` and populate Supabase credentials.
   - Set `MODEL_PATH=models/best.pt` (must be a compatible YOLOv8 segmentation checkpoint), `YOLO_CONFIDENCE_THRESHOLD=0.25`, and `YOLO_IMAGE_SIZE=640` as needed.
+  - Optional post-processing settings: `MASK_MIN_REGION_AREA_PX`, `MASK_CLOSING_KERNEL_SIZE`, and `MASK_CLOSING_ITERATIONS`.
 
 ## 9. Testing Status
-- **Milestones**: Milestone 1 (Foundation), Milestone 2 (Image Pipeline), and Milestone 3 (AI Inference) are completed.
-- **Tests Implemented**: `tests/test_quality_regression.py` (6 tests), `tests/test_process_api.py` (7 tests), and `tests/test_inference_api.py`.
-- **Tests Passed**: 13 / 13.
-- **Tests Failed**: 0.
+- **Milestones**: Milestone 1 (Foundation), Milestone 2 (Image Pipeline), and Milestone 3 (AI Inference) are completed. Milestone 4 is implemented and pending full Python-runtime test execution.
+- **Tests Implemented**: `tests/test_quality_regression.py` (6 tests), `tests/test_process_api.py` (7 tests), `tests/test_inference_api.py`, and `tests/test_measurement_services.py`.
+- **Latest Verification (2026-10-07)**:
+  - `npm run build` passed.
+  - `rg "AWIS-HM" frontend` returned no matches, confirming no new forbidden frontend acronym text.
+  - `python -m compileall backend tests` passed using the bundled Python for syntax checks.
+  - Full `pytest` execution could not run because `.venv\Scripts\python.exe` points to a missing Python 3.11 install and the bundled Python is 3.12, which is incompatible with the venv's NumPy/OpenCV compiled wheels.
+- **Previous Tests Passed**: 13 / 13 before Milestone 4 changes.
+- **Tests Failed**: No application test failures observed in this run; full pytest execution was blocked by the local Python runtime mismatch.
 - **Milestone 3 static check (2026-10-07)**: `npm run build` passed.
 - **Milestone 3 runtime check**: Completed with Python 3.11 virtual environment and a real YOLOv8-seg crack-segmentation checkpoint. The verified flow is upload → quality check → preprocessing → CPU inference → visible segmentation overlay/detection table.
 - **Processing Regression Test Results (2026-10-06)**:
@@ -104,7 +114,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - Low-contrast image -> PASSED (status: pass/warning, preprocessed)
 
 ## 10. Known Problems / Blockers
-- No active implementation blocker for the completed prototype inference flow.
+- Local Python verification blocker: `.venv` was created from `C:\Users\srich\AppData\Local\Python\pythoncore-3.11-64\python.exe`, but that interpreter is no longer available. Recreate the Python 3.11 environment and reinstall `requirements.txt` before running the full backend tests.
 - Final heritage-specific model fine-tuning/evaluation is pending. The current local checkpoint remains a prototype and is intentionally not committed to Git.
 
 ## 10a. Resolved Issues
@@ -113,7 +123,7 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
   - **Fix Applied**: Replaced single-tier thresholds with two-tier FAIL/WARNING/PASS classification.
 
 ## 11. Next Immediate Task
-- Begin **MILESTONE 4 — COMPUTER VISION / DAMAGE MEASUREMENT**: add segmentation-mask post-processing, crack geometry extraction, pixel measurements, and calibrated-mm handling when suitable calibration is available. Do not add scoring, history, RAG, or reports yet.
+- Repair/recreate the Python 3.11 virtual environment, run the full pytest suite, and manually re-run the upload → processing → inference → measurement flow with the current prototype checkpoint. After that, begin **MILESTONE 5 — CONDITION ASSESSMENT** with configurable provisional scoring rules. Do not add history, Supabase persistence, RAG, or reports until the condition-assessment milestone is complete.
 
 ## 12. Change Log
 - **2026-10-05**: Initialized `PROJECT_CONTEXT.md` prior to starting Milestone 1.
@@ -122,3 +132,4 @@ AWIS-HM (AI-Based Wall Inspection System for Heritage Masonry) is a web-based en
 - **2026-10-06 (Evening)**: Completed MILESTONE 2. Implemented the conditional image preprocessing pipeline (`POST /api/process-image`). Added before/after UI and test suite for the pipeline. All tests passed.
 - **2026-10-06 (Late evening)**: Fixed Milestone 2 manual UI result display. The backend returned valid `/uploads/...` URLs, but Vite did not proxy `/uploads`, so the browser received the SPA HTML fallback instead of JPEG bytes. Added the `/uploads` Vite proxy and verified the live before/after flow plus quality-fail behavior.
 - **2026-10-07**: Implemented and runtime-verified Milestone 3 with a Python 3.11 virtual environment and a real YOLOv8-seg crack checkpoint. CPU inference returns multiple detections where present, masks/polygons, and overlays. Continued development uses YOLOv8m `{0: "crack"}` as a lighter prototype model; heritage-specific fine-tuning/evaluation remains pending.
+- **2026-10-07**: Implemented Milestone 4 mask post-processing and pixel measurement. Added conservative cleaned masks, area, skeleton length, representative width, maximum width, orientation, measurement summary, cleaned-mask/measurement overlays, frontend result display, and synthetic-mask tests. Frontend build and syntax checks passed; full pytest run is pending Python 3.11 environment repair.

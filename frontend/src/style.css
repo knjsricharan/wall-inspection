@@ -133,6 +133,9 @@ p { color: var(--ink-soft); line-height: 1.65; }
 .detections-table th, .detections-table td { padding: 12px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .detections-table th { color: #756f67; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .detections-table a { color: var(--terracotta-dark); font-weight: 700; }
+.measurement-grid { margin-bottom: 14px; }
+.measurement-figure { margin: 18px 0 0; }
+.measurement-figure figcaption { color: #736e66; font-size: 12px; padding-top: 7px; }
 @media (max-width: 720px) {
   .app-header__inner { padding: 12px 18px; align-items: flex-start; flex-direction: column; }
   .brand { font-size: 13px; }

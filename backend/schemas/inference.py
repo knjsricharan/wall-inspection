@@ -26,14 +26,32 @@ class SegmentationMask(BaseModel):
 
     polygon: list[list[float]]
     mask_url: str
+    cleaned_mask_url: str | None = None
 
 
 class Detection(BaseModel):
+    detection_id: int | None = None
     class_id: int
     class_name: str
     confidence: float
     bounding_box: BoundingBox
     segmentation_mask: SegmentationMask
+    length_px: float | None = None
+    width_px: float | None = None
+    max_width_px: float | None = None
+    area_px2: int | None = None
+    orientation_deg: float | None = None
+    measurement_unit: str | None = None
+    calibrated: bool | None = None
+
+
+class MeasurementSummary(BaseModel):
+    detected_cracks: int = 0
+    total_area_px2: int = 0
+    total_length_px: float = 0.0
+    max_width_px: float = 0.0
+    measurement_unit: str = "pixel"
+    calibrated: bool = False
 
 
 class InferenceResponse(BaseModel):
@@ -41,4 +59,6 @@ class InferenceResponse(BaseModel):
     message: str
     model_path: str
     overlay_image_url: str | None = None
+    measurement_overlay_url: str | None = None
+    measurement_summary: MeasurementSummary | None = None
     detections: list[Detection] = []
